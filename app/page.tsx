@@ -130,6 +130,55 @@ export default function ShirtPickupSystem() {
     return orders.filter(order => (order.pickupStatus || 'pending') === status).length;
   };
 
+  const parseOrderItems = (sizesStr: string, itemsStr: string) => {
+    try {
+
+      const cleanedSizes = sizesStr.replace(/\\"/g, '"');
+      const cleanedItems = itemsStr.replace(/\\"/g, '"');
+      
+      const sizes = JSON.parse(cleanedSizes);
+      const items = JSON.parse(cleanedItems);
+      
+      const itemDetails = [];
+            if (items.polo && items.polo > 0) {
+        const poloSizes = sizes.polo || [];
+        if (poloSizes.length > 0) {
+          itemDetails.push(`เสื้อโปโล (${items.polo} ตัว) - ไซส์: ${poloSizes.join(', ')}`);
+        } else {
+          itemDetails.push(`เสื้อโปโล (${items.polo} ตัว)`);
+        }
+      }
+      
+      if (items.jacket && items.jacket > 0) {
+        const jacketSizes = sizes.jacket || [];
+        if (jacketSizes.length > 0) {
+          itemDetails.push(`เสื้อแจ็คเก็ต (${items.jacket} ตัว) - ไซส์: ${jacketSizes.join(', ')}`);
+        } else {
+          itemDetails.push(`เสื้อแจ็คเก็ต (${items.jacket} ตัว)`);
+        }
+      }
+      
+      if (items.belt && items.belt > 0) {
+        itemDetails.push(`หัวเข็มขัด (${items.belt} ชิ้น)`);
+      }
+      
+      if (items.tung_ting && items.tung_ting > 0) {
+        itemDetails.push(`ตุ้งติ้ง (${items.tung_ting} ชิ้น)`);
+      }
+      
+      if (items.tie_clip && items.tie_clip > 0) {
+        itemDetails.push(`ที่หนีบเนคไท (${items.tie_clip} ชิ้น)`);
+      }
+      
+      return itemDetails.length > 0 ? itemDetails : ['ไม่มีรายการสินค้า'];
+    } catch (error) {
+      console.error('Error parsing order items:', error);
+      console.log('Sizes string:', sizesStr);
+      console.log('Items string:', itemsStr);
+      return [`ข้อมูลสินค้า: ${sizesStr || 'ไม่มีข้อมูล'}`];
+    }
+  };
+
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -148,11 +197,9 @@ export default function ShirtPickupSystem() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-indigo-100">
-      {/* Navbar */}
       <nav className="bg-[#30319D] shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-20">
-            {/* Logo and Title */}
             <div className="flex items-center">
               <div className="flex-shrink-0 flex items-center">
                 <Image 
@@ -168,7 +215,6 @@ export default function ShirtPickupSystem() {
               </div>
             </div>
 
-            {/* Desktop Navigation */}
             <div className="hidden md:flex items-center space-x-6">
               <Link href="/" className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors">
                 หน้าหลัก
@@ -207,7 +253,6 @@ export default function ShirtPickupSystem() {
           </div>
         </div>
 
-        {/* Mobile Navigation */}
         {mobileMenuOpen && (
           <div className="md:hidden bg-[#30319D] border-t border-indigo-400">
             <div className="px-2 pt-2 pb-3 space-y-1">
@@ -353,6 +398,25 @@ export default function ShirtPickupSystem() {
                         <div className="bg-gray-50 p-3 rounded-lg">
                           <span className="font-semibold text-gray-700">ประเภทการส่ง: </span>
                           <span className="text-gray-900">{order.deliveryType === 'pickup' ? 'มารับเอง' : 'จัดส่ง'}</span>
+                        </div>
+                      </div>
+
+                      {/* รายละเอียดสินค้า */}
+                      <div className="bg-gradient-to-r from-indigo-50 to-blue-50 p-4 rounded-lg mb-3">
+                        <h5 className="font-semibold text-gray-800 mb-2 flex items-center">
+                          <Package className="h-4 w-4 text-[#30319D] mr-2" />
+                          รายการสินค้าที่สั่งซื้อ:
+                        </h5>
+                        <div className="space-y-1">
+                          {parseOrderItems(order.sizes, order.items).map((item, index) => (
+                            <div key={index} className="text-sm text-gray-700 bg-white px-3 py-2 rounded border-l-3 border-[#30319D]">
+                              • {item}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-600">
+                          <span className="font-medium">ราคารวม: </span>
+                          <span className="text-[#30319D] font-bold">{order.price} บาท</span>
                         </div>
                       </div>
                       
