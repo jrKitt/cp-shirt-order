@@ -85,10 +85,16 @@ export default function ShirtPickupSystem() {
       setLoading(true);
       const response = await fetch('/api/orders');
       const data = await response.json();
-      setOrders(data);
-      setFilteredOrders(data);
+      
+      // ตรวจสอบว่า data เป็น array หรือไม่
+      const ordersArray = Array.isArray(data) ? data : [];
+      setOrders(ordersArray);
+      setFilteredOrders(ordersArray);
     } catch (error) {
       console.error('Error fetching orders:', error);
+      // ตั้งค่า default เป็น array ว่าง
+      setOrders([]);
+      setFilteredOrders([]);
     } finally {
       setLoading(false);
     }
@@ -131,51 +137,63 @@ export default function ShirtPickupSystem() {
   };
 
   const parseOrderItems = (sizesStr: string, itemsStr: string) => {
-    try {
+    // helper function ตัดอิโมจิออกจากข้อความ
+    const removeEmoji = (str: string) => str.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '');
+    
+    // helper function เช็คว่า string เป็น JSON ที่ถูกต้อง
+    const safeParse = (str: string) => {
+      try {
+        return JSON.parse(str);
+      } catch {
+        return null;
+      }
+    };
 
-      const cleanedSizes = sizesStr.replace(/\\"/g, '"');
-      const cleanedItems = itemsStr.replace(/\\"/g, '"');
+    try {
+      // ไม่ต้อง fix เพราะ TSV มี JSON ที่ถูกต้องแล้ว
+      const sizes = safeParse(sizesStr);
+      const items = safeParse(itemsStr);
       
-      const sizes = JSON.parse(cleanedSizes);
-      const items = JSON.parse(cleanedItems);
+      if (!sizes || !items) {
+        return ['ข้อมูลสินค้าไม่สมบูรณ์'];
+      }
       
       const itemDetails = [];
-            if (items.polo && items.polo > 0) {
+      
+      if (items.polo && items.polo > 0) {
         const poloSizes = sizes.polo || [];
         if (poloSizes.length > 0) {
-          itemDetails.push(`เสื้อโปโล (${items.polo} ตัว) - ไซส์: ${poloSizes.join(', ')}`);
+          itemDetails.push(removeEmoji(`เสื้อโปโล (${items.polo} ตัว) - ไซส์: ${poloSizes.join(', ')}`));
         } else {
-          itemDetails.push(`เสื้อโปโล (${items.polo} ตัว)`);
+          itemDetails.push(removeEmoji(`เสื้อโปโล (${items.polo} ตัว)`));
         }
       }
       
       if (items.jacket && items.jacket > 0) {
         const jacketSizes = sizes.jacket || [];
         if (jacketSizes.length > 0) {
-          itemDetails.push(`เสื้อแจ็คเก็ต (${items.jacket} ตัว) - ไซส์: ${jacketSizes.join(', ')}`);
+          itemDetails.push(removeEmoji(`เสื้อแจ็คเก็ต (${items.jacket} ตัว) - ไซส์: ${jacketSizes.join(', ')}`));
         } else {
-          itemDetails.push(`เสื้อแจ็คเก็ต (${items.jacket} ตัว)`);
+          itemDetails.push(removeEmoji(`เสื้อแจ็คเก็ต (${items.jacket} ตัว)`));
         }
       }
       
       if (items.belt && items.belt > 0) {
-        itemDetails.push(`หัวเข็มขัด (${items.belt} ชิ้น)`);
+        itemDetails.push(removeEmoji(`หัวเข็มขัด (${items.belt} ชิ้น)`));
       }
       
       if (items.tung_ting && items.tung_ting > 0) {
-        itemDetails.push(`ตุ้งติ้ง (${items.tung_ting} ชิ้น)`);
+        itemDetails.push(removeEmoji(`ตุ้งติ้ง (${items.tung_ting} ชิ้น)`));
       }
       
       if (items.tie_clip && items.tie_clip > 0) {
-        itemDetails.push(`ที่หนีบเนคไท (${items.tie_clip} ชิ้น)`);
+        itemDetails.push(removeEmoji(`ที่หนีบเนคไท (${items.tie_clip} ชิ้น)`));
       }
       
       return itemDetails.length > 0 ? itemDetails : ['ไม่มีรายการสินค้า'];
     } catch (error) {
       console.error('Error parsing order items:', error);
-      console.log('Sizes string:', sizesStr);
-      console.log('Items string:', itemsStr);
-      return [`ข้อมูลสินค้า: ${sizesStr || 'ไม่มีข้อมูล'}`];
+      return ['ข้อมูลสินค้าไม่สมบูรณ์'];
     }
   };
 
@@ -313,15 +331,15 @@ export default function ShirtPickupSystem() {
             </div>
             <input
               type="text"
-              placeholder="ค้นหาด้วยชื่อ, เลขออเดอร์, รหัสนักศึกษา หรืออีเมล..."
+              placeholder="ค้นหาด้วยชื่อ, รหัสนักศึกษา, อีเมล"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="block w-full pl-12 pr-4 py-4 border border-gray-300 rounded-xl text-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-[#30319D] focus:border-[#30319D] transition-all duration-200"
+              className="block w-full pl-12 pr-4 py-4 border text-black border-gray-300 rounded-xl text-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-[#30319D] focus:border-[#30319D] transition-all duration-200"
             />
           </div>
           {searchTerm && (
             <p className="mt-3 text-sm text-gray-600">
-              พบ {filteredOrders.length} รายการจากการค้นหา &quot;{searchTerm}&quot;
+              พบ {filteredOrders.length} รายการจากการค้นหา &quot;{searchTerm}&quot; จากทั้งหมด {orders.length} รายการ
             </p>
           )}
         </div>
