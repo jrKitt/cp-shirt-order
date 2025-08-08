@@ -49,6 +49,7 @@ export default function ShirtPickupSystem() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all'); // เพิ่ม state สำหรับ filter สถานะ
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -65,20 +66,27 @@ export default function ShirtPickupSystem() {
   }, []);
 
   useEffect(() => {
-    if (searchTerm.trim() === '') {
-      setFilteredOrders(orders);
-    } else {
-      const filtered = orders.filter(order =>
+    let filtered = orders;
+    
+    // กรองตามการค้นหา
+    if (searchTerm.trim() !== '') {
+      filtered = filtered.filter(order =>
         order.firstname.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.lastname.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.orderNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.studentId.toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.email.toLowerCase().includes(searchTerm.toLowerCase())
       );
-      setFilteredOrders(filtered);
     }
+    
+    // กรองตามสถานะ
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(order => (order.pickupStatus || 'pending') === statusFilter);
+    }
+    
+    setFilteredOrders(filtered);
     setCurrentPage(1); 
-  }, [searchTerm, orders]);
+  }, [searchTerm, statusFilter, orders]);
 
   const fetchOrders = async () => {
     try {
@@ -154,7 +162,6 @@ export default function ShirtPickupSystem() {
     };
 
     try {
-      // ไม่ต้อง fix เพราะ TSV มี JSON ที่ถูกต้องแล้ว
       const sizes = safeParse(sizesStr);
       const items = safeParse(itemsStr);
       
@@ -306,7 +313,7 @@ export default function ShirtPickupSystem() {
         )}
       </nav>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ">
         
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           {Object.entries(statusLabels).map(([status, label]) => (
@@ -328,25 +335,53 @@ export default function ShirtPickupSystem() {
           ))}
         </div>
 
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8 border border-gray-100">
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <Search className="h-5 w-5 text-gray-400" />
+                </div>
+
+        {/* Filter และ Search Section */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 p-5">
+          {/* Search Box */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <Search className="h-5 w-5 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="ค้นหาด้วยชื่อ, เลขออเดอร์, รหัสนักศึกษา หรืออีเมล..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="block w-full pl-12 pr-4 py-4 border border-gray-300 rounded-xl text-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-[#30319D] focus:border-[#30319D] transition-all duration-200"
+              />
             </div>
-            <input
-              type="text"
-              placeholder="ค้นหาด้วยชื่อ, รหัสนักศึกษา, อีเมล"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="block w-full pl-12 pr-4 py-4 border text-black border-gray-300 rounded-xl text-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-[#30319D] focus:border-[#30319D] transition-all duration-200"
-            />
           </div>
-          {searchTerm && (
-            <p className="mt-3 text-sm text-gray-600">
-              พบ {filteredOrders.length} รายการจากการค้นหา &quot;{searchTerm}&quot; จากทั้งหมด {orders.length} รายการ
-            </p>
-          )}
+          
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100 text-black">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="block w-full px-4 py-4 border border-gray-300 rounded-xl text-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#30319D] focus:border-[#30319D] transition-all duration-200"
+            >
+              <option value="all">ทั้งหมด ({orders.length} รายการ)</option>
+              <option value="pending">รอการรับ ({getStatusCount('pending')} รายการ)</option>
+              <option value="picked_up">รับแล้ว ({getStatusCount('picked_up')} รายการ)</option>
+              <option value="shipping">รอจัดส่ง ({getStatusCount('shipping')} รายการ)</option>
+              <option value="shipped">จัดส่งแล้ว ({getStatusCount('shipped')} รายการ)</option>
+            </select>
+          </div>
         </div>
+
+        {(searchTerm || statusFilter !== 'all') && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+            <p className="text-sm text-blue-800">
+              <span className="font-medium">ผลการกรอง:</span> พบ {filteredOrders.length} รายการ
+              {searchTerm && <span> จากการค้นหา &quot;{searchTerm}&quot;</span>}
+              {statusFilter !== 'all' && <span> ที่มีสถานะ &quot;{statusLabels[statusFilter as keyof typeof statusLabels]}&quot;</span>}
+              {' '}จากทั้งหมด {orders.length} รายการ
+            </p>
+          </div>
+        )}
+
+        <div className="bg-white shadow-xl rounded-xl overflow-hidden border border-gray-100 p-5">
 
         <div className="bg-white shadow-xl rounded-xl overflow-hidden border border-gray-100">
           <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-indigo-100">
