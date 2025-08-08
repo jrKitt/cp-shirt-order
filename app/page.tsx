@@ -86,13 +86,17 @@ export default function ShirtPickupSystem() {
       const response = await fetch('/api/orders');
       const data = await response.json();
       
-      // ตรวจสอบว่า data เป็น array หรือไม่
       const ordersArray = Array.isArray(data) ? data : [];
-      setOrders(ordersArray);
-      setFilteredOrders(ordersArray);
+      
+      const processedOrders = ordersArray.map(order => ({
+        ...order,
+        pickupStatus: order.deliveryType === 'shipping' ? 'shipping' : (order.pickupStatus || 'pending')
+      }));
+      
+      setOrders(processedOrders);
+      setFilteredOrders(processedOrders);
     } catch (error) {
       console.error('Error fetching orders:', error);
-      // ตั้งค่า default เป็น array ว่าง
       setOrders([]);
       setFilteredOrders([]);
     } finally {

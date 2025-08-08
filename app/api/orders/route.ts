@@ -34,7 +34,9 @@ function parseCSV(csvText: string): Order[] {
     
     // เปลี่ยนจาก comma เป็น tab สำหรับ TSV
     const values = lines[i].split('\t');
-    if (values.length >= 16) { // ปรับจำนวนคอลัมน์ตาม TSV
+    
+    // ลดเงื่อนไขลงเป็น 10 เพื่อรองรับข้อมูลที่ไม่ครบ
+    if (values.length >= 10) { 
       data.push({
         timestamp: values[0] || '',
         email: values[1] || '',
