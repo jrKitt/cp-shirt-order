@@ -1,9 +1,25 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
-import { Search, Package, User, Phone, MapPin, Clock, Menu, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useState, useEffect } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import * as XLSX from 'xlsx';
+import { saveAs } from 'file-saver';
+import {
+  Search,
+  Package,
+  User,
+  Phone,
+  MapPin,
+  Clock,
+  Menu,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  FileText,
+  Table,
+} from "lucide-react";
 
 interface Order {
   timestamp: string;
@@ -26,21 +42,21 @@ interface Order {
   items: string;
   note: string;
   slip: string;
-  pickupStatus?: 'pending' | 'picked_up' | 'shipping' | 'shipped';
+  pickupStatus?: "pending" | "picked_up" | "shipping" | "shipped";
 }
 
 const statusLabels = {
-  pending: 'รอการรับ',
-  picked_up: 'รับแล้ว',
-  shipping: 'รอจัดส่ง',
-  shipped: 'จัดส่งแล้ว'
+  pending: "รอการรับ",
+  picked_up: "รับแล้ว",
+  shipping: "รอจัดส่ง",
+  shipped: "จัดส่งแล้ว",
 };
 
 const statusColors = {
-  pending: 'bg-amber-50 text-amber-700 border-amber-200',
-  picked_up: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  shipping: 'bg-blue-50 text-blue-700 border-blue-200',
-  shipped: 'bg-purple-50 text-purple-700 border-purple-200'
+  pending: "bg-amber-50 text-amber-700 border-amber-200",
+  picked_up: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  shipping: "bg-blue-50 text-blue-700 border-blue-200",
+  shipped: "bg-purple-50 text-purple-700 border-purple-200",
 };
 
 const ITEMS_PER_PAGE = 10;
@@ -48,8 +64,8 @@ const ITEMS_PER_PAGE = 10;
 export default function ShirtPickupSystem() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all'); // เพิ่ม state สำหรับ filter สถานะ
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all"); // เพิ่ม state สำหรับ filter สถานะ
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -67,44 +83,69 @@ export default function ShirtPickupSystem() {
 
   useEffect(() => {
     let filtered = orders;
-    
+
     // กรองตามการค้นหา
-    if (searchTerm.trim() !== '') {
-      filtered = filtered.filter(order =>
-        order.firstname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.lastname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.orderNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.studentId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.email.toLowerCase().includes(searchTerm.toLowerCase())
+    if (searchTerm.trim() !== "") {
+      filtered = filtered.filter(
+        (order) =>
+          order.firstname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          order.lastname.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          order.orderNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          order.studentId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          order.email.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
-    
+
     // กรองตามสถานะ
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(order => (order.pickupStatus || 'pending') === statusFilter);
+    if (statusFilter !== "all") {
+      filtered = filtered.filter(
+        (order) => (order.pickupStatus || "pending") === statusFilter
+      );
     }
-    
+
     setFilteredOrders(filtered);
-    setCurrentPage(1); 
+    setCurrentPage(1);
   }, [searchTerm, statusFilter, orders]);
 
   const fetchOrders = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/orders');
+      const response = await fetch("/api/orders");
       const data = await response.json();
-      
+
       const ordersArray = Array.isArray(data) ? data : [];
-      
-      const processedOrders = ordersArray.map(order => ({
+
+      const processedOrders = ordersArray.map((order) => ({
         ...order,
-        pickupStatus: order.deliveryType === 'shipping' ? 'shipping' : (order.pickupStatus || 'pending')
+        pickupStatus:
+          order.deliveryType === "shipping"
+            ? "shipping"
+            : order.pickupStatus || "pending",
       }));
-      
+
+      // โหลด status ที่บันทึกไว้ใน localStorage
+      if (typeof window !== 'undefined') {
+        const savedStatuses = localStorage.getItem('orderStatuses');
+        if (savedStatuses) {
+          try {
+            const parsedStatuses = JSON.parse(savedStatuses);
+            const ordersWithSavedStatus = processedOrders.map(order => ({
+              ...order,
+              pickupStatus: parsedStatuses[order.orderNo] || order.pickupStatus
+            }));
+            setOrders(ordersWithSavedStatus);
+            setFilteredOrders(ordersWithSavedStatus);
+            return;
+          } catch (error) {
+            console.error('Error parsing saved statuses:', error);
+          }
+        }
+      }
+
       setOrders(processedOrders);
       setFilteredOrders(processedOrders);
     } catch (error) {
-      console.error('Error fetching orders:', error);
+      console.error("Error fetching orders:", error);
       setOrders([]);
       setFilteredOrders([]);
     } finally {
@@ -115,10 +156,28 @@ export default function ShirtPickupSystem() {
   const updatePickupStatus = async (orderNo: string, newStatus: string) => {
     try {
       setUpdating(orderNo);
-      const response = await fetch('/api/orders', {
-        method: 'PUT',
+      
+      // อัปเดตใน localStorage ก่อน
+      if (typeof window !== 'undefined') {
+        const savedStatuses = localStorage.getItem('orderStatuses');
+        const currentStatuses = savedStatuses ? JSON.parse(savedStatuses) : {};
+        currentStatuses[orderNo] = newStatus;
+        localStorage.setItem('orderStatuses', JSON.stringify(currentStatuses));
+      }
+
+      // อัปเดต state ใน React
+      const updatedOrders = orders.map((order) =>
+        order.orderNo === orderNo
+          ? { ...order, pickupStatus: newStatus as Order["pickupStatus"] }
+          : order
+      );
+      setOrders(updatedOrders);
+
+      // ส่งไปยัง API เพื่อ log การเปลี่ยนแปลง
+      const response = await fetch("/api/orders", {
+        method: "PUT",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           orderNo,
@@ -126,32 +185,27 @@ export default function ShirtPickupSystem() {
         }),
       });
 
-      if (response.ok) {
-        const updatedOrders = orders.map(order =>
-          order.orderNo === orderNo
-            ? { ...order, pickupStatus: newStatus as Order['pickupStatus'] }
-            : order
-        );
-        setOrders(updatedOrders);
-      } else {
-        alert('เกิดข้อผิดพลาดในการอัปเดตสถานะ');
+      if (!response.ok) {
+        console.warn("API update failed, but local storage updated");
       }
     } catch (error) {
-      console.error('Error updating status:', error);
-      alert('เกิดข้อผิดพลาดในการอัปเดตสถานะ');
+      console.error("Error updating status:", error);
     } finally {
       setUpdating(null);
     }
   };
 
   const getStatusCount = (status: string) => {
-    return orders.filter(order => (order.pickupStatus || 'pending') === status).length;
+    return orders.filter(
+      (order) => (order.pickupStatus || "pending") === status
+    ).length;
   };
 
   const parseOrderItems = (sizesStr: string, itemsStr: string) => {
     // helper function ตัดอิโมจิออกจากข้อความ
-    const removeEmoji = (str: string) => str.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '');
-    
+    const removeEmoji = (str: string) =>
+      str.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "");
+
     // helper function เช็คว่า string เป็น JSON ที่ถูกต้อง
     const safeParse = (str: string) => {
       try {
@@ -164,53 +218,158 @@ export default function ShirtPickupSystem() {
     try {
       const sizes = safeParse(sizesStr);
       const items = safeParse(itemsStr);
-      
+
       if (!sizes || !items) {
-        return ['ข้อมูลสินค้าไม่สมบูรณ์'];
+        return ["ข้อมูลสินค้าไม่สมบูรณ์"];
       }
-      
+
       const itemDetails = [];
-      
+
       if (items.polo && items.polo > 0) {
         const poloSizes = sizes.polo || [];
         if (poloSizes.length > 0) {
-          itemDetails.push(removeEmoji(`เสื้อโปโล (${items.polo} ตัว) - ไซส์: ${poloSizes.join(', ')}`));
+          itemDetails.push(
+            removeEmoji(
+              `เสื้อโปโล (${items.polo} ตัว) - ไซส์: ${poloSizes.join(", ")}`
+            )
+          );
         } else {
           itemDetails.push(removeEmoji(`เสื้อโปโล (${items.polo} ตัว)`));
         }
       }
-      
+
       if (items.jacket && items.jacket > 0) {
         const jacketSizes = sizes.jacket || [];
         if (jacketSizes.length > 0) {
-          itemDetails.push(removeEmoji(`เสื้อแจ็คเก็ต (${items.jacket} ตัว) - ไซส์: ${jacketSizes.join(', ')}`));
+          itemDetails.push(
+            removeEmoji(
+              `เสื้อแจ็คเก็ต (${items.jacket} ตัว) - ไซส์: ${jacketSizes.join(
+                ", "
+              )}`
+            )
+          );
         } else {
           itemDetails.push(removeEmoji(`เสื้อแจ็คเก็ต (${items.jacket} ตัว)`));
         }
       }
-      
+
       if (items.belt && items.belt > 0) {
         itemDetails.push(removeEmoji(`หัวเข็มขัด (${items.belt} ชิ้น)`));
       }
-      
+
       if (items.tung_ting && items.tung_ting > 0) {
         itemDetails.push(removeEmoji(`ตุ้งติ้ง (${items.tung_ting} ชิ้น)`));
       }
-      
+
       if (items.tie_clip && items.tie_clip > 0) {
         itemDetails.push(removeEmoji(`ที่หนีบเนคไท (${items.tie_clip} ชิ้น)`));
       }
-      
-      return itemDetails.length > 0 ? itemDetails : ['ไม่มีรายการสินค้า'];
+
+      return itemDetails.length > 0 ? itemDetails : ["ไม่มีรายการสินค้า"];
     } catch (error) {
-      console.error('Error parsing order items:', error);
-      return ['ข้อมูลสินค้าไม่สมบูรณ์'];
+      console.error("Error parsing order items:", error);
+      return ["ข้อมูลสินค้าไม่สมบูรณ์"];
     }
   };
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  // ฟังก์ชั่นสำหรับ export ข้อมูล
+  const exportToCSV = () => {
+    const csvData = filteredOrders.map(order => ({
+      'เลขออเดอร์': order.orderNo,
+      'ชื่อ': order.firstname,
+      'นามสกุล': order.lastname,
+      'อีเมล': order.email,
+      'รหัสนักศึกษา': order.studentId,
+      'สาขา': order.studentMajor,
+      'คณะ': order.studentFaculty,
+      'เบอร์โทร': order.phone,
+      'ปีการศึกษา': order.year,
+      'แพ็คเกจ': order.packageName,
+      'ราคา': order.price,
+      'ประเภทการส่ง': order.deliveryType === 'pickup' ? 'มารับเอง' : 'จัดส่ง',
+      'ที่อยู่': order.address || '-',
+      'สถานะ': statusLabels[(order.pickupStatus || 'pending') as keyof typeof statusLabels],
+      'วันที่สั่ง': new Date(order.timestamp).toLocaleDateString('th-TH'),
+      'รายการสินค้า': parseOrderItems(order.sizes, order.items).join(', '),
+      'หมายเหตุ': order.note || '-'
+    }));
+
+    const csv = convertToCSV(csvData);
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    saveAs(blob, `orders_export_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  const exportToExcel = () => {
+    const excelData = filteredOrders.map(order => ({
+      'เลขออเดอร์': order.orderNo,
+      'ชื่อ': order.firstname,
+      'นามสกุล': order.lastname,
+      'อีเมล': order.email,
+      'รหัสนักศึกษา': order.studentId,
+      'สาขา': order.studentMajor,
+      'คณะ': order.studentFaculty,
+      'เบอร์โทร': order.phone,
+      'ปีการศึกษา': order.year,
+      'แพ็คเกจ': order.packageName,
+      'ราคา': parseFloat(order.price) || 0,
+      'ประเภทการส่ง': order.deliveryType === 'pickup' ? 'มารับเอง' : 'จัดส่ง',
+      'ที่อยู่': order.address || '-',
+      'สถานะ': statusLabels[(order.pickupStatus || 'pending') as keyof typeof statusLabels],
+      'วันที่สั่ง': new Date(order.timestamp).toLocaleDateString('th-TH'),
+      'รายการสินค้า': parseOrderItems(order.sizes, order.items).join(', '),
+      'หมายเหตุ': order.note || '-'
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Orders');
+    
+    // กำหนดความกว้างของคอลัมน์
+    const wscols = [
+      { wch: 15 }, // เลขออเดอร์
+      { wch: 15 }, // ชื่อ
+      { wch: 15 }, // นามสกุล
+      { wch: 25 }, // อีเมล
+      { wch: 15 }, // รหัสนักศึกษา
+      { wch: 20 }, // สาขา
+      { wch: 20 }, // คณะ
+      { wch: 15 }, // เบอร์โทร
+      { wch: 10 }, // ปีการศึกษา
+      { wch: 20 }, // แพ็คเกจ
+      { wch: 10 }, // ราคา
+      { wch: 15 }, // ประเภทการส่ง
+      { wch: 30 }, // ที่อยู่
+      { wch: 15 }, // สถานะ
+      { wch: 15 }, // วันที่สั่ง
+      { wch: 40 }, // รายการสินค้า
+      { wch: 20 }, // หมายเหตุ
+    ];
+    ws['!cols'] = wscols;
+
+    XLSX.writeFile(wb, `orders_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const convertToCSV = (data: Record<string, string | number>[]) => {
+    if (data.length === 0) return '';
+    
+    const headers = Object.keys(data[0]);
+    const csvContent = [
+      headers.join(','),
+      ...data.map(row => 
+        headers.map(header => {
+          const value = row[header];
+          // ห่อด้วย quotes และ escape quotes ใน value
+          return `"${String(value).replace(/"/g, '""')}"`;
+        }).join(',')
+      )
+    ].join('\n');
+    
+    return csvContent;
   };
 
   if (loading) {
@@ -231,12 +390,12 @@ export default function ShirtPickupSystem() {
           <div className="flex justify-between h-20">
             <div className="flex items-center">
               <div className="flex-shrink-0 flex items-center">
-                <Image 
-                  src="/image/SMOLOGO.webp" 
-                  alt="SMOCP Logo" 
-                  width={40} 
-                  height={40} 
-                  className="mr-3" 
+                <Image
+                  src="/image/SMOLOGO.webp"
+                  alt="SMOCP Logo"
+                  width={40}
+                  height={40}
+                  className="mr-3"
                 />
                 <div>
                   <h1 className="text-xl font-bold text-white">SMOCP</h1>
@@ -245,24 +404,39 @@ export default function ShirtPickupSystem() {
             </div>
 
             <div className="hidden md:flex items-center space-x-6">
-              <Link href="/" className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors">
+              <Link
+                href="/"
+                className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors"
+              >
                 หน้าหลัก
               </Link>
-              <a href="#" className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors border-b-2 border-white">
+              <a
+                href="#"
+                className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors border-b-2 border-white"
+              >
                 ระบบรับเสื้อ
               </a>
-              <a href="" className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors">
+              <a
+                href=""
+                className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors"
+              >
                 ปฏิทินกิจกรรม
               </a>
-              <a href="" className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors">
+              <a
+                href=""
+                className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors"
+              >
                 บริการสำหรับนักศึกษา
               </a>
-              <Link href="/shop" className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors">
+              <Link
+                href="/shop"
+                className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors"
+              >
                 ร้านค้าสโมสร
               </Link>
-              <a 
+              <a
                 href="https://www.facebook.com/profile.php?id=100083108863117&mibextid=wwXIfr&rdid=SjHPRnXMQKJ5FEDh&share_url=https%3A%2F%2Fwww.facebook.com%2Fshare%2F1BUay9x1MG%2F%3Fmibextid%3DwwXIfr"
-                target="_blank" 
+                target="_blank"
                 rel="noopener noreferrer"
                 className="text-white hover:text-indigo-200 px-3 py-2 text-sm font-medium transition-colors"
               >
@@ -276,7 +450,11 @@ export default function ShirtPickupSystem() {
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className="text-white hover:text-indigo-200 focus:outline-none focus:text-indigo-200"
               >
-                {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+                {mobileMenuOpen ? (
+                  <X className="h-6 w-6" />
+                ) : (
+                  <Menu className="h-6 w-6" />
+                )}
               </button>
             </div>
           </div>
@@ -285,24 +463,39 @@ export default function ShirtPickupSystem() {
         {mobileMenuOpen && (
           <div className="md:hidden bg-[#30319D] border-t border-indigo-400">
             <div className="px-2 pt-2 pb-3 space-y-1">
-              <Link href="/" className="block px-3 py-2 text-white hover:text-indigo-200 hover:bg-indigo-700 rounded-md">
+              <Link
+                href="/"
+                className="block px-3 py-2 text-white hover:text-indigo-200 hover:bg-indigo-700 rounded-md"
+              >
                 หน้าหลัก
               </Link>
-              <a href="#" className="block px-3 py-2 text-white font-semibold bg-indigo-700 rounded-md">
+              <a
+                href="#"
+                className="block px-3 py-2 text-white font-semibold bg-indigo-700 rounded-md"
+              >
                 ระบบรับเสื้อ
               </a>
-              <a href="" className="block px-3 py-2 text-white hover:text-indigo-200 hover:bg-indigo-700 rounded-md">
+              <a
+                href=""
+                className="block px-3 py-2 text-white hover:text-indigo-200 hover:bg-indigo-700 rounded-md"
+              >
                 ปฏิทินกิจกรรม
               </a>
-              <a href="" className="block px-3 py-2 text-white hover:text-indigo-200 hover:bg-indigo-700 rounded-md">
+              <a
+                href=""
+                className="block px-3 py-2 text-white hover:text-indigo-200 hover:bg-indigo-700 rounded-md"
+              >
                 บริการสำหรับนักศึกษา
               </a>
-              <Link href="/shop" className="block px-3 py-2 text-white hover:text-indigo-200 hover:bg-indigo-700 rounded-md">
+              <Link
+                href="/shop"
+                className="block px-3 py-2 text-white hover:text-indigo-200 hover:bg-indigo-700 rounded-md"
+              >
                 ร้านค้าสโมสร
               </Link>
-              <a 
+              <a
                 href="https://www.facebook.com/profile.php?id=100083108863117&mibextid=wwXIfr&rdid=SjHPRnXMQKJ5FEDh&share_url=https%3A%2F%2Fwww.facebook.com%2Fshare%2F1BUay9x1MG%2F%3Fmibextid%3DwwXIfr"
-                target="_blank" 
+                target="_blank"
                 rel="noopener noreferrer"
                 className="block px-3 py-2 text-white hover:text-indigo-200 hover:bg-indigo-700 rounded-md"
               >
@@ -313,21 +506,33 @@ export default function ShirtPickupSystem() {
         )}
       </nav>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ">
-        
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           {Object.entries(statusLabels).map(([status, label]) => (
-            <div key={status} className="bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow duration-300 p-6 border border-gray-100">
+            <div
+              key={status}
+              className="bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow duration-300 p-6 border border-gray-100"
+            >
               <div className="flex items-center">
                 <div className="flex-shrink-0">
-                  <div className={`h-12 w-12 rounded-full flex items-center justify-center ${statusColors[status as keyof typeof statusColors]} border-2`}>
-                    <span className="text-lg font-bold">{getStatusCount(status)}</span>
+                  <div
+                    className={`h-12 w-12 rounded-full flex items-center justify-center ${
+                      statusColors[status as keyof typeof statusColors]
+                    } border-2`}
+                  >
+                    <span className="text-lg font-bold">
+                      {getStatusCount(status)}
+                    </span>
                   </div>
                 </div>
                 <div className="ml-5 w-0 flex-1">
                   <dl>
-                    <dt className="text-sm font-medium text-gray-500 truncate">{label}</dt>
-                    <dd className="text-2xl font-bold text-gray-900">{getStatusCount(status)} รายการ</dd>
+                    <dt className="text-sm font-medium text-gray-500 truncate">
+                      {label}
+                    </dt>
+                    <dd className="text-2xl font-bold text-gray-900">
+                      {getStatusCount(status)} รายการ
+                    </dd>
                   </dl>
                 </div>
               </div>
@@ -335,10 +540,8 @@ export default function ShirtPickupSystem() {
           ))}
         </div>
 
-                </div>
-
         {/* Filter และ Search Section */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 p-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {/* Search Box */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
             <div className="relative">
@@ -354,61 +557,151 @@ export default function ShirtPickupSystem() {
               />
             </div>
           </div>
-          
+
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100 text-black">
+            
             <select
+              id="status-filter"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="block w-full px-4 py-4 border border-gray-300 rounded-xl text-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#30319D] focus:border-[#30319D] transition-all duration-200"
             >
               <option value="all">ทั้งหมด ({orders.length} รายการ)</option>
-              <option value="pending">รอการรับ ({getStatusCount('pending')} รายการ)</option>
-              <option value="picked_up">รับแล้ว ({getStatusCount('picked_up')} รายการ)</option>
-              <option value="shipping">รอจัดส่ง ({getStatusCount('shipping')} รายการ)</option>
-              <option value="shipped">จัดส่งแล้ว ({getStatusCount('shipped')} รายการ)</option>
+              <option value="pending">
+                รอการรับ ({getStatusCount("pending")} รายการ)
+              </option>
+              <option value="picked_up">
+                รับแล้ว ({getStatusCount("picked_up")} รายการ)
+              </option>
+              <option value="shipping">
+                รอจัดส่ง ({getStatusCount("shipping")} รายการ)
+              </option>
+              <option value="shipped">
+                จัดส่งแล้ว ({getStatusCount("shipped")} รายการ)
+              </option>
             </select>
           </div>
         </div>
 
-        {(searchTerm || statusFilter !== 'all') && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-            <p className="text-sm text-blue-800">
-              <span className="font-medium">ผลการกรอง:</span> พบ {filteredOrders.length} รายการ
-              {searchTerm && <span> จากการค้นหา &quot;{searchTerm}&quot;</span>}
-              {statusFilter !== 'all' && <span> ที่มีสถานะ &quot;{statusLabels[statusFilter as keyof typeof statusLabels]}&quot;</span>}
-              {' '}จากทั้งหมด {orders.length} รายการ
-            </p>
+        {searchTerm === "" && statusFilter === "all" && (
+          <div className="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-xl p-4 mb-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm font-medium text-gray-800">
+                  <span className="text-green-600">ข้อมูลทั้งหมด:</span> {orders.length} รายการ
+                </p>
+                <p className="text-xs text-gray-600 mt-1">
+                  ดาวน์โหลดข้อมูลออเดอร์ทั้งหมดพร้อมสถานะการรับสินค้า
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={exportToCSV}
+                  className="inline-flex items-center px-4 py-2 bg-white border border-green-300 rounded-lg text-sm font-medium text-green-700 hover:bg-green-50 transition-colors duration-200 shadow-sm"
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  Export CSV
+                </button>
+                <button
+                  onClick={exportToExcel}
+                  className="inline-flex items-center px-4 py-2 bg-green-600 border border-green-600 rounded-lg text-sm font-medium text-white hover:bg-green-700 transition-colors duration-200 shadow-sm"
+                >
+                  <Table className="h-4 w-4 mr-2" />
+                  Export Excel
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
-        <div className="bg-white shadow-xl rounded-xl overflow-hidden border border-gray-100 p-5">
-
-        <div className="bg-white shadow-xl rounded-xl overflow-hidden border border-gray-100">
-          <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-indigo-100">
+        {(searchTerm || statusFilter !== "all") && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
             <div className="flex justify-between items-center">
-              <h3 className="text-xl font-bold text-gray-900">
-                รายการออเดอร์ ({filteredOrders.length} รายการ)
-              </h3>
-              {totalPages > 1 && (
-                <p className="text-sm text-gray-600">
-                  หน้า {currentPage} จาก {totalPages}
-                </p>
-              )}
+              <p className="text-sm text-blue-800">
+                <span className="font-medium">ผลการกรอง:</span> พบ{" "}
+                {filteredOrders.length} รายการ
+                {searchTerm && <span> จากการค้นหา &quot;{searchTerm}&quot;</span>}
+                {statusFilter !== "all" && (
+                  <span>
+                    {" "}
+                    ที่มีสถานะ &quot;
+                    {statusLabels[statusFilter as keyof typeof statusLabels]}&quot;
+                  </span>
+                )}{" "}
+                จากทั้งหมด {orders.length} รายการ
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={exportToCSV}
+                  className="inline-flex items-center px-3 py-1.5 bg-white border border-blue-300 rounded-md text-xs font-medium text-blue-700 hover:bg-blue-50 transition-colors duration-200"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  CSV
+                </button>
+                <button
+                  onClick={exportToExcel}
+                  className="inline-flex items-center px-3 py-1.5 bg-blue-600 border border-blue-600 rounded-md text-xs font-medium text-white hover:bg-blue-700 transition-colors duration-200"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  Excel
+                </button>
+              </div>
             </div>
           </div>
-          
+        )}
+
+        <div className="bg-white shadow-xl rounded-xl overflow-hidden border border-gray-100">{/* Orders list */}
+          <div className="px-6 py-5 border-b border-gray-200 bg-gradient-to-r from-indigo-50 to-indigo-100">
+            <div className="flex justify-between items-center flex-wrap gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">
+                  รายการออเดอร์ ({filteredOrders.length} รายการ)
+                </h3>
+                {totalPages > 1 && (
+                  <p className="text-sm text-gray-600 mt-1">
+                    หน้า {currentPage} จาก {totalPages}
+                  </p>
+                )}
+              </div>
+              
+              {/* <div className="flex items-center gap-3">
+                <button
+                  onClick={exportToCSV}
+                  className="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-400 transition-colors duration-200 shadow-sm"
+                >
+                  <FileText className="h-4 w-4 mr-2 text-green-600" />
+                  Export CSV
+                </button>
+                <button
+                  onClick={exportToExcel}
+                  className="inline-flex items-center px-4 py-2 bg-[#30319D] border border-[#30319D] rounded-lg text-sm font-medium text-white hover:bg-[#2a2a8a] transition-colors duration-200 shadow-sm"
+                >
+                  <Table className="h-4 w-4 mr-2" />
+                  Export Excel
+                </button>
+              </div> */}
+            </div>
+          </div>
+
           {paginatedOrders.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <Package className="mx-auto h-16 w-16 text-gray-400" />
-              <h3 className="mt-4 text-lg font-medium text-gray-900">ไม่พบรายการ</h3>
+              <h3 className="mt-4 text-lg font-medium text-gray-900">
+                ไม่พบรายการ
+              </h3>
               <p className="mt-2 text-sm text-gray-500">
-                {searchTerm ? 'ไม่พบรายการที่ตรงกับการค้นหา' : 'ยังไม่มีรายการออเดอร์'}
+                {searchTerm
+                  ? "ไม่พบรายการที่ตรงกับการค้นหา"
+                  : "ยังไม่มีรายการออเดอร์"}
               </p>
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
               {paginatedOrders.map((order) => (
-                <div key={order.orderNo} className="px-6 py-6 hover:bg-gray-50 transition-colors duration-200">
+                <div
+                  key={order.orderNo}
+                  className="px-6 py-6 hover:bg-gray-50 transition-colors duration-200"
+                >
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-4 mb-4">
@@ -423,11 +716,23 @@ export default function ShirtPickupSystem() {
                           </h4>
                           <p className="text-sm text-gray-500">{order.email}</p>
                         </div>
-                        <div className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold border-2 ${statusColors[(order.pickupStatus || 'pending') as keyof typeof statusColors]}`}>
-                          {statusLabels[(order.pickupStatus || 'pending') as keyof typeof statusLabels]}
+                        <div
+                          className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold border-2 ${
+                            statusColors[
+                              (order.pickupStatus ||
+                                "pending") as keyof typeof statusColors
+                            ]
+                          }`}
+                        >
+                          {
+                            statusLabels[
+                              (order.pickupStatus ||
+                                "pending") as keyof typeof statusLabels
+                            ]
+                          }
                         </div>
                       </div>
-                      
+
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-gray-600 mb-3">
                         <div className="flex items-center gap-2">
                           <Package className="h-4 w-4 text-[#30319D]" />
@@ -443,18 +748,32 @@ export default function ShirtPickupSystem() {
                         </div>
                         <div className="flex items-center gap-2">
                           <Clock className="h-4 w-4 text-[#30319D]" />
-                          <span>{new Date(order.timestamp).toLocaleDateString('th-TH')}</span>
+                          <span>
+                            {new Date(order.timestamp).toLocaleDateString(
+                              "th-TH"
+                            )}
+                          </span>
                         </div>
                       </div>
-                      
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-3">
                         <div className="bg-gray-50 p-3 rounded-lg">
-                          <span className="font-semibold text-gray-700">แพ็คเกจ: </span>
-                          <span className="text-gray-900">{order.packageName}</span>
+                          <span className="font-semibold text-gray-700">
+                            แพ็คเกจ:{" "}
+                          </span>
+                          <span className="text-gray-900">
+                            {order.packageName}
+                          </span>
                         </div>
                         <div className="bg-gray-50 p-3 rounded-lg">
-                          <span className="font-semibold text-gray-700">ประเภทการส่ง: </span>
-                          <span className="text-gray-900">{order.deliveryType === 'pickup' ? 'มารับเอง' : 'จัดส่ง'}</span>
+                          <span className="font-semibold text-gray-700">
+                            ประเภทการส่ง:{" "}
+                          </span>
+                          <span className="text-gray-900">
+                            {order.deliveryType === "pickup"
+                              ? "มารับเอง"
+                              : "จัดส่ง"}
+                          </span>
                         </div>
                       </div>
 
@@ -465,44 +784,63 @@ export default function ShirtPickupSystem() {
                           รายการสินค้าที่สั่งซื้อ:
                         </h5>
                         <div className="space-y-1">
-                          {parseOrderItems(order.sizes, order.items).map((item, index) => (
-                            <div key={index} className="text-sm text-gray-700 bg-white px-3 py-2 rounded border-l-3 border-[#30319D]">
-                              • {item}
-                            </div>
-                          ))}
+                          {parseOrderItems(order.sizes, order.items).map(
+                            (item, index) => (
+                              <div
+                                key={index}
+                                className="text-sm text-gray-700 bg-white px-3 py-2 rounded border-l-3 border-[#30319D]"
+                              >
+                                • {item}
+                              </div>
+                            )
+                          )}
                         </div>
                         <div className="mt-2 text-xs text-gray-600">
                           <span className="font-medium">ราคารวม: </span>
-                          <span className="text-[#30319D] font-bold">{order.price} บาท</span>
+                          <span className="text-[#30319D] font-bold">
+                            {order.price} บาท
+                          </span>
                         </div>
                       </div>
-                      
-                      {order.deliveryType === 'shipping' && order.address && (
+
+                      {order.deliveryType === "shipping" && order.address && (
                         <div className="mt-3 flex items-start gap-2 text-sm bg-indigo-50 p-3 rounded-lg">
                           <MapPin className="h-4 w-4 mt-0.5 text-[#30319D]" />
                           <span className="text-gray-700">{order.address}</span>
                         </div>
                       )}
                     </div>
-                    
+
                     <div className="flex-shrink-0 ml-6">
                       <div className="flex flex-col gap-2">
-                        {['pending', 'picked_up', 'shipping', 'shipped'].map((status) => (
-                          <button
-                            key={status}
-                            onClick={() => updatePickupStatus(order.orderNo, status)}
-                            disabled={updating === order.orderNo}
-                            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all duration-200 border-2 ${
-                              (order.pickupStatus || 'pending') === status
-                                ? statusColors[status as keyof typeof statusColors]
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-200'
-                            } ${
-                              updating === order.orderNo ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md'
-                            }`}
-                          >
-                            {updating === order.orderNo ? 'กำลังอัปเดต...' : statusLabels[status as keyof typeof statusLabels]}
-                          </button>
-                        ))}
+                        {["pending", "picked_up", "shipping", "shipped"].map(
+                          (status) => (
+                            <button
+                              key={status}
+                              onClick={() =>
+                                updatePickupStatus(order.orderNo, status)
+                              }
+                              disabled={updating === order.orderNo}
+                              className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all duration-200 border-2 ${
+                                (order.pickupStatus || "pending") === status
+                                  ? statusColors[
+                                      status as keyof typeof statusColors
+                                    ]
+                                  : "bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-200"
+                              } ${
+                                updating === order.orderNo
+                                  ? "opacity-50 cursor-not-allowed"
+                                  : "hover:shadow-md"
+                              }`}
+                            >
+                              {updating === order.orderNo
+                                ? "กำลังอัปเดต..."
+                                : statusLabels[
+                                    status as keyof typeof statusLabels
+                                  ]}
+                            </button>
+                          )
+                        )}
                       </div>
                     </div>
                   </div>
@@ -510,12 +848,17 @@ export default function ShirtPickupSystem() {
               ))}
             </div>
           )}
-          
+
           {totalPages > 1 && (
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
               <div className="flex items-center justify-between">
                 <div className="text-sm text-gray-700">
-                  แสดง {((currentPage - 1) * ITEMS_PER_PAGE) + 1} ถึง {Math.min(currentPage * ITEMS_PER_PAGE, filteredOrders.length)} จาก {filteredOrders.length} รายการ
+                  แสดง {(currentPage - 1) * ITEMS_PER_PAGE + 1} ถึง{" "}
+                  {Math.min(
+                    currentPage * ITEMS_PER_PAGE,
+                    filteredOrders.length
+                  )}{" "}
+                  จาก {filteredOrders.length} รายการ
                 </div>
                 <div className="flex items-center space-x-2">
                   <button
@@ -525,39 +868,44 @@ export default function ShirtPickupSystem() {
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
-                  
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
-                    if (
-                      page === 1 ||
-                      page === totalPages ||
-                      (page >= currentPage - 2 && page <= currentPage + 2)
-                    ) {
-                      return (
-                        <button
-                          key={page}
-                          onClick={() => handlePageChange(page)}
-                          className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors duration-200 ${
-                            currentPage === page
-                              ? 'bg-[#30319D] text-white border border-[#30319D]'
-                              : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
-                          }`}
-                        >
-                          {page}
-                        </button>
-                      );
-                    } else if (
-                      page === currentPage - 3 ||
-                      page === currentPage + 3
-                    ) {
-                      return (
-                        <span key={page} className="px-3 py-2 text-sm text-gray-500">
-                          ...
-                        </span>
-                      );
+
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                    (page) => {
+                      if (
+                        page === 1 ||
+                        page === totalPages ||
+                        (page >= currentPage - 2 && page <= currentPage + 2)
+                      ) {
+                        return (
+                          <button
+                            key={page}
+                            onClick={() => handlePageChange(page)}
+                            className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors duration-200 ${
+                              currentPage === page
+                                ? "bg-[#30319D] text-white border border-[#30319D]"
+                                : "text-gray-700 bg-white border border-gray-300 hover:bg-gray-50"
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        );
+                      } else if (
+                        page === currentPage - 3 ||
+                        page === currentPage + 3
+                      ) {
+                        return (
+                          <span
+                            key={page}
+                            className="px-3 py-2 text-sm text-gray-500"
+                          >
+                            ...
+                          </span>
+                        );
+                      }
+                      return null;
                     }
-                    return null;
-                  })}
-                  
+                  )}
+
                   <button
                     onClick={() => handlePageChange(currentPage + 1)}
                     disabled={currentPage === totalPages}
@@ -575,11 +923,19 @@ export default function ShirtPickupSystem() {
       <footer className="bg-[#30319D] text-white mt-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center">
-            <h3 className="text-lg font-semibold mb-2">STUDENT UNION | College Of Computing</h3>
-            <p className="text-indigo-200">สโมสรนักศึกษาวิทยาลัยการคอมพิวเตอร์</p>
-            <p className="text-indigo-200">วิทยาลัยการคอมพิวเตอร์ มหาวิทยาลัยขอนแก่น</p>
+            <h3 className="text-lg font-semibold mb-2">
+              STUDENT UNION | College Of Computing
+            </h3>
+            <p className="text-indigo-200">
+              สโมสรนักศึกษาวิทยาลัยการคอมพิวเตอร์
+            </p>
+            <p className="text-indigo-200">
+              วิทยาลัยการคอมพิวเตอร์ มหาวิทยาลัยขอนแก่น
+            </p>
             <div className="mt-4 pt-4 border-t border-indigo-400">
-              <p className="text-sm text-indigo-200">© 2025 SMOCP68. All rights reserved.</p>
+              <p className="text-sm text-indigo-200">
+                © 2025 SMOCP68. All rights reserved.
+              </p>
             </div>
           </div>
         </div>

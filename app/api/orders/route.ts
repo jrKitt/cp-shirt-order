@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 // ไม่ใช้ fs เพื่อรองรับ Vercel
+// ใช้ in-memory storage สำหรับการอัปเดตสถานะ
+const statusUpdates: { [orderNo: string]: string } = {};
 
 interface Order {
   timestamp: string;
@@ -58,7 +60,7 @@ function parseCSV(csvText: string): Order[] {
         items: values[17] || '{}',
         note: values[18] || '',
         slip: values[19] || '',
-        pickupStatus: 'pending' // default status สำหรับทุกรายการ
+        pickupStatus: (statusUpdates[values[2]] as Order['pickupStatus']) || 'pending' // ใช้ status ที่อัปเดตแล้ว หรือ default เป็น pending
       });
     }
   }
@@ -103,13 +105,15 @@ export async function PUT(request: NextRequest) {
   try {
     const { orderNo, pickupStatus } = await request.json();
     
-    // บน Vercel ไม่สามารถเขียนไฟล์ได้ จึงใช้ในหน่วยความจำชั่วคราว
-    // ในโปรเจ็คจริงควรใช้ database
+    // อัปเดต status ใน memory storage
+    statusUpdates[orderNo] = pickupStatus;
+    
     console.log('Update request:', { orderNo, pickupStatus });
+    console.log('Current status updates:', statusUpdates);
     
     return NextResponse.json({ 
       success: true, 
-      message: 'Status updated (in-memory only on Vercel)',
+      message: 'Status updated successfully',
       orderNo,
       pickupStatus 
     });
