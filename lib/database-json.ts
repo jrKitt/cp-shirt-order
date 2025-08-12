@@ -1,8 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+// ใช้ /tmp สำหรับ Vercel deployment หรือ local data directory
+const DATA_DIR = process.env.VERCEL 
+  ? path.join('/tmp', 'data')
+  : path.join(process.cwd(), 'data');
 const STATUS_FILE = path.join(DATA_DIR, 'status_updates.json');
+
+// ตัวแปรสำหรับเก็บข้อมูลในหน่วยความจำ (fallback สำหรับ Vercel)
+let inMemoryData: StatusUpdate[] = [];
+let useFileSystem = true;
 
 export interface StatusUpdate {
   id: string;
@@ -14,21 +21,95 @@ export interface StatusUpdate {
 
 // สร้างโฟลเดอร์ data ถ้ายังไม่มี
 function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    useFileSystem = true;
+  } catch (error) {
+    console.error('Failed to create data directory:', error);
+    // ถ้าไม่สามารถสร้าง directory ได้ ให้ fallback เป็นในหน่วยความจำ
+    if (process.env.VERCEL) {
+      console.log('Running on Vercel - using in-memory fallback');
+    }
+    useFileSystem = false;
   }
 }
 
 // อ่านข้อมูลสถานะทั้งหมด
 function readStatusUpdates(): StatusUpdate[] {
-  ensureDataDir();
-  
-  if (!fs.existsSync(STATUS_FILE)) {
-    console.log('Status file does not exist, creating new one...');
-    return [];
-  }
-  
+  // พยายามใช้ file system ก่อน
   try {
+    ensureDataDir();
+    
+    if (!useFileSystem) {
+      console.log('Using in-memory data storage');
+      // ถ้าใช้ครั้งแรกและไม่มีข้อมูล ให้โหลดข้อมูลเริ่มต้น
+      if (inMemoryData.length === 0) {
+        try {
+          // ลองโหลดจาก initial-data.json ก่อน
+          const initialDataPath = process.env.VERCEL 
+            ? '/var/task/public/initial-data.json'
+            : './public/initial-data.json';
+          
+          if (fs.existsSync(initialDataPath)) {
+            const initialData = fs.readFileSync(initialDataPath, 'utf-8');
+            const parsed = JSON.parse(initialData);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              inMemoryData = parsed;
+              console.log(`✓ Loaded ${parsed.length} initial records from JSON`);
+              return inMemoryData;
+            }
+          }
+          
+          // ถ้าไม่มีใน JSON ให้ลองโหลดจาก CSV
+          const csvPath = process.env.VERCEL 
+            ? '/var/task/public/backendData.tsv'
+            : './public/backendData.tsv';
+            
+          if (fs.existsSync(csvPath)) {
+            console.log('Loading initial status updates from CSV...');
+            // สร้างข้อมูลเริ่มต้นจาก CSV (ทุกรายการจะเป็น pending)
+            const csvData = fs.readFileSync(csvPath, 'utf-8');
+            const lines = csvData.split('\n');
+            const initialUpdates: StatusUpdate[] = [];
+            
+            for (let i = 0; i < lines.length; i++) {
+              const line = lines[i].trim();
+              if (!line) continue;
+              
+              const values = line.split('\t');
+              if (values.length >= 3) {
+                const orderNo = values[2]?.trim(); // orderNo อยู่ในคอลัมน์ที่ 3
+                if (orderNo && orderNo !== 'Order No') {
+                  initialUpdates.push({
+                    id: Date.now().toString() + i,
+                    order_no: orderNo,
+                    pickup_status: 'pending',
+                    datapickup: '',
+                    updated_at: new Date().toISOString()
+                  });
+                }
+              }
+            }
+            
+            if (initialUpdates.length > 0) {
+              inMemoryData = initialUpdates;
+              console.log(`✓ Created ${initialUpdates.length} initial status records from CSV`);
+            }
+          }
+        } catch {
+          console.log('No initial data found, starting with empty array');
+        }
+      }
+      return inMemoryData;
+    }
+    
+    if (!fs.existsSync(STATUS_FILE)) {
+      console.log('Status file does not exist, creating new one...');
+      return [];
+    }
+    
     const data = fs.readFileSync(STATUS_FILE, 'utf-8');
     
     // ตรวจสอบว่าไฟล์ไม่ว่าง
@@ -56,9 +137,16 @@ function readStatusUpdates(): StatusUpdate[] {
   } catch (error) {
     console.error('Error reading status file:', error);
     
-    // พยายามอ่านจาก backup
+    // ถ้าอ่านไฟล์ไม่ได้ ให้ fallback เป็น in-memory
+    if (process.env.VERCEL) {
+      console.log('File system error on Vercel, using in-memory storage');
+      useFileSystem = false;
+      return inMemoryData;
+    }
+    
+    // พยายามอ่านจาก backup (สำหรับ local development)
     const backupFile = STATUS_FILE.replace('.json', '_backup.json');
-    if (fs.existsSync(backupFile)) {
+    if (useFileSystem && fs.existsSync(backupFile)) {
       console.log('Attempting to read from backup...');
       try {
         const backupData = fs.readFileSync(backupFile, 'utf-8');
@@ -76,16 +164,25 @@ function readStatusUpdates(): StatusUpdate[] {
     }
     
     console.log('Returning empty array as fallback');
-    return [];
+    return inMemoryData.length > 0 ? inMemoryData : [];
   }
 }
 
 // เขียนข้อมูลสถานะ
 function writeStatusUpdates(updates: StatusUpdate[]) {
-  ensureDataDir();
+  // อัปเดต in-memory data เสมอ
+  inMemoryData = [...updates];
+  
+  // ถ้าไม่สามารถใช้ file system ได้ ให้ใช้ in-memory อย่างเดียว
+  if (!useFileSystem) {
+    console.log(`✓ Saved ${updates.length} status updates to in-memory storage`);
+    return;
+  }
   
   try {
-    // สร้าง backup ก่อนเขียนไฟล์ใหม่
+    ensureDataDir();
+    
+    // สร้าง backup ก่อนเขียนไฟล์ใหม่ (เฉพาะ local)
     if (fs.existsSync(STATUS_FILE)) {
       const backupFile = STATUS_FILE.replace('.json', '_backup.json');
       fs.copyFileSync(STATUS_FILE, backupFile);
@@ -104,7 +201,15 @@ function writeStatusUpdates(updates: StatusUpdate[]) {
   } catch (error) {
     console.error('Error writing status file:', error);
     
-    // พยายาม restore จาก backup
+    // ถ้าเขียนไฟล์ไม่ได้ บน Vercel ให้ใช้ in-memory
+    if (process.env.VERCEL) {
+      console.log('File write error on Vercel, using in-memory storage only');
+      useFileSystem = false;
+      console.log(`✓ Saved ${updates.length} status updates to in-memory storage`);
+      return;
+    }
+    
+    // พยายาม restore จาก backup (สำหรับ local)
     const backupFile = STATUS_FILE.replace('.json', '_backup.json');
     if (fs.existsSync(backupFile)) {
       console.log('Attempting to restore from backup...');

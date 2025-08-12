@@ -1,22 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎽 SMOCP Shirt Order Management System
 
-## Getting Started
+ระบบจัดการการสั่งซื้อและรับเสื้อสำหรับ SMOCP (Student Major Organization - Computer Programming)
 
-First, run the development server:
+## Features
+
+- จัดการสถานะการรับสินค้า (pending, picked_up, shipping, shipped)
+- กำหนดวันที่รับของ (datapickup)
+- ซิงค์ข้อมูลระหว่างหลายเครื่อง
+- Export ข้อมูลเป็น Excel
+- Responsive design รองรับมือถือ
+- ระบบ backup อัตโนมัติทุก 30 วินาที
+- รองรับ deployment บน Vercel
+
+## Quick Start
+
+### Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+เปิด [http://localhost:3000](http://localhost:3000) เพื่อดูเว็บไซต์
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Production Build
+
+```bash
+npm run build
+npm start
+```
+
+## 🌐 Deploy on Vercel
+
+1. Push โค้ดขึ้น GitHub
+2. เข้า [Vercel Dashboard](https://vercel.com)
+3. Import project จาก GitHub
+4. Vercel จะ deploy อัตโนมัติ
+
+**หมายเหตุ**: ระบบได้ปรับให้รองรับ Vercel โดยใช้ in-memory storage และ `/tmp` directory
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
