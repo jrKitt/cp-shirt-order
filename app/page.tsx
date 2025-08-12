@@ -76,6 +76,7 @@ export default function ShirtPickupSystem() {
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string>('');
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [isServerOnline, setIsServerOnline] = useState(true);
 
   const totalPages = Math.ceil(filteredOrders.length / ITEMS_PER_PAGE);
   const paginatedOrders = filteredOrders.slice(
@@ -229,6 +230,7 @@ export default function ShirtPickupSystem() {
           localStorage.setItem('orderStatuses', JSON.stringify(currentStatuses));
         }
         
+        setIsServerOnline(true); // เซิร์ฟเวอร์ทำงานปกติ
         console.log(`✓ Successfully updated ${orderNo} to ${newStatus}`);
       } else {
         console.error("API update failed");
@@ -236,7 +238,37 @@ export default function ShirtPickupSystem() {
       }
     } catch (error) {
       console.error("Error updating status:", error);
-      alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาตรวจสอบการเชื่อมต่อ");
+      
+      // ถ้าเซิร์ฟเวอร์ไม่ตอบสนอง (offline mode)
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        console.log('🔴 Server offline - saving to localStorage only');
+        setIsServerOnline(false); // เซิร์ฟเวอร์ออฟไลน์
+        
+        // อัปเดต state ใน React แม้ offline
+        const updatedOrders = orders.map((order) =>
+          order.orderNo === orderNo
+            ? { ...order, pickupStatus: newStatus as Order["pickupStatus"], datapickup: datapickup || order.datapickup }
+            : order
+        );
+        setOrders(updatedOrders);
+        
+        // บันทึกใน localStorage พร้อมระบุว่าเป็น offline
+        if (typeof window !== 'undefined') {
+          const savedStatuses = localStorage.getItem('orderStatuses');
+          const currentStatuses = savedStatuses ? JSON.parse(savedStatuses) : {};
+          currentStatuses[orderNo] = { 
+            status: newStatus, 
+            datapickup: datapickup || '',
+            offline: true, // ระบุว่าบันทึกตอนออฟไลน์
+            timestamp: new Date().toISOString()
+          };
+          localStorage.setItem('orderStatuses', JSON.stringify(currentStatuses));
+        }
+        
+        alert('⚠️ เซิร์ฟเวอร์ไม่ตอบสนอง\n✅ ข้อมูลถูกบันทึกในเครื่องแล้ว\n🔄 จะซิงค์อัตโนมัติเมื่อเซิร์ฟเวอร์กลับมาทำงาน');
+      } else {
+        alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาตรวจสอบการเชื่อมต่อ");
+      }
     } finally {
       setUpdating(null);
     }
@@ -376,7 +408,6 @@ export default function ShirtPickupSystem() {
       });
 
       if (response.ok) {
-        const result = await response.json();
         await fetchOrders();
         setLastSync(new Date().toLocaleString('th-TH'));
         alert(`อัปโหลดและนำเข้าข้อมูลเรียบร้อย: ${importData.length} รายการ`);
@@ -402,8 +433,18 @@ export default function ShirtPickupSystem() {
       
       console.log("Sync completed:", currentData);
       setLastSync(new Date().toLocaleString('th-TH'));
+      setIsServerOnline(true); // เซิร์ฟเวอร์ทำงานปกติ
     } catch (error) {
       console.error("Error syncing data:", error);
+      
+      // ถ้าเซิร์ฟเวอร์ไม่ตอบสนอง
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        console.log('🔴 Server offline - cannot sync');
+        setIsServerOnline(false); // เซิร์ฟเวอร์ออฟไลน์
+        // ไม่แสดง alert เพราะจะรบกวนผู้ใช้
+      } else {
+        console.log('🟡 Sync failed:', error);
+      }
     } finally {
       setSyncing(false);
     }
@@ -895,6 +936,9 @@ export default function ShirtPickupSystem() {
                     Sync ล่าสุด: {lastSync}
                   </span>
                 )}
+                <span className={`text-xs px-2 py-1 rounded ${isServerOnline ? 'text-green-700 bg-green-100' : 'text-red-700 bg-red-100'}`}>
+                  {isServerOnline ? '🟢 เซิร์ฟเวอร์ออนไลน์' : '🔴 เซิร์ฟเวอร์ออฟไลน์'}
+                </span>
                 <button
                   onClick={exportToCSV}
                   className="inline-flex items-center px-3 py-1.5 bg-white border border-blue-300 rounded-md text-xs font-medium text-blue-700 hover:bg-blue-50 transition-colors duration-200"
