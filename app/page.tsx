@@ -42,7 +42,10 @@ interface Order {
   items: string;
   note: string;
   slip: string;
+  total?: string;
+  date?: string;
   pickupStatus?: "pending" | "picked_up" | "shipping" | "shipped";
+  datapickup?: string;
 }
 
 const statusLabels = {
@@ -70,6 +73,8 @@ export default function ShirtPickupSystem() {
   const [updating, setUpdating] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string>('');
 
   const totalPages = Math.ceil(filteredOrders.length / ITEMS_PER_PAGE);
   const paginatedOrders = filteredOrders.slice(
@@ -79,6 +84,22 @@ export default function ShirtPickupSystem() {
 
   useEffect(() => {
     fetchOrders();
+    
+    // Auto-save ทุก 30 วินาที (เป็นการ backup เพิ่มเติม)
+    const autoSaveInterval = setInterval(() => {
+      if (typeof window !== 'undefined') {
+        const lastAction = localStorage.getItem('lastOrderAction');
+        const now = Date.now();
+        
+        // ถ้ามีการเปลี่ยนแปลงใน 30 วินาทีที่ผ่านมา
+        if (lastAction && (now - parseInt(lastAction)) < 30000) {
+          console.log('Auto-saving data...');
+          syncData();
+        }
+      }
+    }, 30000); // ทุก 30 วินาที
+    
+    return () => clearInterval(autoSaveInterval);
   }, []);
 
   useEffect(() => {
@@ -129,15 +150,30 @@ export default function ShirtPickupSystem() {
         if (savedStatuses) {
           try {
             const parsedStatuses = JSON.parse(savedStatuses);
-            const ordersWithSavedStatus = processedOrders.map(order => ({
-              ...order,
-              pickupStatus: parsedStatuses[order.orderNo] || order.pickupStatus
-            }));
+            const ordersWithSavedStatus = processedOrders.map(order => {
+              const savedData = parsedStatuses[order.orderNo];
+              
+              // ทำความสะอาดข้อมูล datapickup ที่อาจเป็น "0"
+              let cleanDatepickup = '';
+              if (typeof savedData === 'object' && savedData?.datapickup) {
+                if (savedData.datapickup !== "0" && !isNaN(Date.parse(savedData.datapickup))) {
+                  cleanDatepickup = savedData.datapickup;
+                }
+              }
+              
+              return {
+                ...order,
+                pickupStatus: typeof savedData === 'string' ? savedData : savedData?.status || order.pickupStatus,
+                datapickup: cleanDatepickup || order.datapickup || ''
+              };
+            });
             setOrders(ordersWithSavedStatus);
             setFilteredOrders(ordersWithSavedStatus);
             return;
           } catch (error) {
             console.error('Error parsing saved statuses:', error);
+            // ลบข้อมูลที่เสียหายออก
+            localStorage.removeItem('orderStatuses');
           }
         }
       }
@@ -153,27 +189,16 @@ export default function ShirtPickupSystem() {
     }
   };
 
-  const updatePickupStatus = async (orderNo: string, newStatus: string) => {
+  const updatePickupStatus = async (orderNo: string, newStatus: string, datapickup?: string) => {
     try {
       setUpdating(orderNo);
       
-      // อัปเดตใน localStorage ก่อน
+      // บันทึก timestamp สำหรับ auto-save
       if (typeof window !== 'undefined') {
-        const savedStatuses = localStorage.getItem('orderStatuses');
-        const currentStatuses = savedStatuses ? JSON.parse(savedStatuses) : {};
-        currentStatuses[orderNo] = newStatus;
-        localStorage.setItem('orderStatuses', JSON.stringify(currentStatuses));
+        localStorage.setItem('lastOrderAction', Date.now().toString());
       }
-
-      // อัปเดต state ใน React
-      const updatedOrders = orders.map((order) =>
-        order.orderNo === orderNo
-          ? { ...order, pickupStatus: newStatus as Order["pickupStatus"] }
-          : order
-      );
-      setOrders(updatedOrders);
-
-      // ส่งไปยัง API เพื่อ log การเปลี่ยนแปลง
+      
+      // ส่งไปยัง API ก่อน (เป็น primary storage)
       const response = await fetch("/api/orders", {
         method: "PUT",
         headers: {
@@ -182,16 +207,139 @@ export default function ShirtPickupSystem() {
         body: JSON.stringify({
           orderNo,
           pickupStatus: newStatus,
+          datapickup: datapickup || '',
         }),
       });
 
-      if (!response.ok) {
-        console.warn("API update failed, but local storage updated");
+      if (response.ok) {
+        // อัปเดต state ใน React
+        const updatedOrders = orders.map((order) =>
+          order.orderNo === orderNo
+            ? { ...order, pickupStatus: newStatus as Order["pickupStatus"], datapickup: datapickup || order.datapickup }
+            : order
+        );
+        setOrders(updatedOrders);
+        
+        // อัปเดตใน localStorage เป็น backup
+        if (typeof window !== 'undefined') {
+          const savedStatuses = localStorage.getItem('orderStatuses');
+          const currentStatuses = savedStatuses ? JSON.parse(savedStatuses) : {};
+          currentStatuses[orderNo] = { status: newStatus, datapickup: datapickup || '' };
+          localStorage.setItem('orderStatuses', JSON.stringify(currentStatuses));
+        }
+        
+        console.log(`✓ Successfully updated ${orderNo} to ${newStatus}`);
+      } else {
+        console.error("API update failed");
+        alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาลองใหม่");
       }
     } catch (error) {
       console.error("Error updating status:", error);
+      alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาตรวจสอบการเชื่อมต่อ");
     } finally {
       setUpdating(null);
+    }
+  };
+
+  const updateDatepickup = async (orderNo: string, datapickup: string) => {
+    try {
+      setUpdating(orderNo);
+      
+      // ตรวจสอบรูปแบบวันที่ก่อนส่ง
+      if (datapickup && isNaN(Date.parse(datapickup))) {
+        console.error("Invalid date format:", datapickup);
+        alert("รูปแบบวันที่ไม่ถูกต้อง กรุณาเลือกวันที่ใหม่");
+        return;
+      }
+      
+      // บันทึก timestamp สำหรับ auto-save
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('lastOrderAction', Date.now().toString());
+      }
+      
+      // อัปเดตในฐานข้อมูล
+      const response = await fetch("/api/datapickup", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderNo,
+          datapickup: datapickup || '',
+        }),
+      });
+
+      if (response.ok) {
+        // อัปเดต state ใน React
+        const updatedOrders = orders.map((order) =>
+          order.orderNo === orderNo
+            ? { ...order, datapickup: datapickup || '', pickupStatus: datapickup ? 'picked_up' as Order["pickupStatus"] : order.pickupStatus }
+            : order
+        );
+        setOrders(updatedOrders);
+        
+        console.log(`✓ Successfully updated datapickup for ${orderNo}: ${datapickup}`);
+      } else {
+        console.error("Failed to update datapickup");
+        alert("เกิดข้อผิดพลาดในการบันทึกวันที่ กรุณาลองใหม่");
+      }
+    } catch (error) {
+      console.error("Error updating datapickup:", error);
+      alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล กรุณาตรวจสอบการเชื่อมต่อ");
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const importDatapickup = async () => {
+    try {
+      setSyncing(true);
+      const response = await fetch("/api/import/datapickup", {
+        method: "POST",
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log("Import result:", result);
+        
+        // รีเฟรชข้อมูล
+        await fetchOrders();
+        
+        setLastSync(new Date().toLocaleString('th-TH'));
+        alert(`นำเข้าข้อมูลเรียบร้อย: ${result.imported} รายการ`);
+      } else {
+        alert("เกิดข้อผิดพลาดในการนำเข้าข้อมูล");
+      }
+    } catch (error) {
+      console.error("Error importing datapickup:", error);
+      alert("เกิดข้อผิดพลาดในการนำเข้าข้อมูล");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const syncData = async () => {
+    try {
+      setSyncing(true);
+      
+      // ส่งข้อมูลปัจจุบันไปยัง server อื่น (ถ้ามี)
+      const currentData = await fetch("/api/sync").then(res => res.json());
+      
+      console.log("Sync completed:", currentData);
+      setLastSync(new Date().toLocaleString('th-TH'));
+    } catch (error) {
+      console.error("Error syncing data:", error);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const clearCorruptedData = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('orderStatuses');
+      localStorage.removeItem('lastOrderAction');
+      alert('ล้างข้อมูล cache เรียบร้อยแล้ว จะรีเฟรชหน้าเว็บ');
+      window.location.reload();
     }
   };
 
@@ -294,6 +442,7 @@ export default function ShirtPickupSystem() {
       'ประเภทการส่ง': order.deliveryType === 'pickup' ? 'มารับเอง' : 'จัดส่ง',
       'ที่อยู่': order.address || '-',
       'สถานะ': statusLabels[(order.pickupStatus || 'pending') as keyof typeof statusLabels],
+      'วันที่รับสินค้า': order.datapickup ? new Date(order.datapickup).toLocaleDateString('th-TH') : '-',
       'วันที่สั่ง': new Date(order.timestamp).toLocaleDateString('th-TH'),
       'รายการสินค้า': parseOrderItems(order.sizes, order.items).join(', '),
       'หมายเหตุ': order.note || '-'
@@ -320,6 +469,7 @@ export default function ShirtPickupSystem() {
       'ประเภทการส่ง': order.deliveryType === 'pickup' ? 'มารับเอง' : 'จัดส่ง',
       'ที่อยู่': order.address || '-',
       'สถานะ': statusLabels[(order.pickupStatus || 'pending') as keyof typeof statusLabels],
+      'วันที่รับสินค้า': order.datapickup ? new Date(order.datapickup).toLocaleDateString('th-TH') : '-',
       'วันที่สั่ง': new Date(order.timestamp).toLocaleDateString('th-TH'),
       'รายการสินค้า': parseOrderItems(order.sizes, order.items).join(', '),
       'หมายเหตุ': order.note || '-'
@@ -553,7 +703,7 @@ export default function ShirtPickupSystem() {
                 placeholder="ค้นหาด้วยชื่อ, เลขออเดอร์, รหัสนักศึกษา หรืออีเมล..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="block w-full pl-12 pr-4 py-4 border border-gray-300 rounded-xl text-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-[#30319D] focus:border-[#30319D] transition-all duration-200"
+                className="text-black block w-full pl-12 pr-4 py-4 border border-gray-300 rounded-xl text-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-[#30319D] focus:border-[#30319D] transition-all duration-200"
               />
             </div>
           </div>
@@ -630,7 +780,32 @@ export default function ShirtPickupSystem() {
                 )}{" "}
                 จากทั้งหมด {orders.length} รายการ
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={importDatapickup}
+                  disabled={syncing}
+                  className="inline-flex items-center px-3 py-1.5 bg-green-600 border border-green-600 rounded-md text-xs font-medium text-white hover:bg-green-700 transition-colors duration-200 disabled:opacity-50"
+                >
+                  {syncing ? "นำเข้า..." : "นำเข้า Datapickup"}
+                </button>
+                <button
+                  onClick={syncData}
+                  disabled={syncing}
+                  className="inline-flex items-center px-3 py-1.5 bg-purple-600 border border-purple-600 rounded-md text-xs font-medium text-white hover:bg-purple-700 transition-colors duration-200 disabled:opacity-50"
+                >
+                  {syncing ? "Sync..." : "Sync ข้อมูล"}
+                </button>
+                <button
+                  onClick={clearCorruptedData}
+                  className="inline-flex items-center px-3 py-1.5 bg-red-600 border border-red-600 rounded-md text-xs font-medium text-white hover:bg-red-700 transition-colors duration-200"
+                >
+                  ล้าง Cache
+                </button>
+                {lastSync && (
+                  <span className="text-xs text-gray-500 px-2 py-1 bg-gray-100 rounded">
+                    Sync ล่าสุด: {lastSync}
+                  </span>
+                )}
                 <button
                   onClick={exportToCSV}
                   className="inline-flex items-center px-3 py-1.5 bg-white border border-blue-300 rounded-md text-xs font-medium text-blue-700 hover:bg-blue-50 transition-colors duration-200"
@@ -841,6 +1016,29 @@ export default function ShirtPickupSystem() {
                             </button>
                           )
                         )}
+                        
+                        {/* ส่วนสำหรับใส่วันที่รับสินค้า */}
+                        <div className="mt-3 p-3 bg-gray-50 rounded-lg border-2 border-gray-200">
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            วันที่รับสินค้า:
+                          </label>
+                          <input
+                            type="date"
+                            value={order.datapickup && order.datapickup !== "0" ? order.datapickup : ''}
+                            onChange={(e) => updateDatepickup(order.orderNo, e.target.value)}
+                            disabled={updating === order.orderNo}
+                            className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:border-[#30319D] focus:ring-1 focus:ring-[#30319D] outline-none transition-colors duration-200"
+                          />
+                          {order.datapickup && order.datapickup !== "0" && (
+                            <div className="mt-1 text-xs text-green-600 font-medium">
+                              ✓ รับเมื่อ: {new Date(order.datapickup).toLocaleDateString('th-TH', { 
+                                year: 'numeric', 
+                                month: 'long', 
+                                day: 'numeric' 
+                              })}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

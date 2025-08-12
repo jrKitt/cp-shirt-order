@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-// ไม่ใช้ fs เพื่อรองรับ Vercel
-// ใช้ in-memory storage สำหรับการอัปเดตสถานะ
-const statusUpdates: { [orderNo: string]: string } = {};
+import { updateOrderStatus, getOrderStatus, getAllStatusUpdates, saveOrderToDatabase } from '@/lib/database-json';
 
 interface Order {
   timestamp: string;
@@ -24,14 +22,27 @@ interface Order {
   items: string;
   note: string;
   slip: string;
+  total?: string;
+  date?: string;
   pickupStatus?: 'pending' | 'picked_up' | 'shipping' | 'shipped';
+  datapickup?: string;
 }
 
 function parseCSV(csvText: string): Order[] {
   const lines = csvText.split('\n');
   const data: Order[] = [];
   
-  for (let i = 1; i < lines.length; i++) {
+  // โหลดข้อมูล status จาก database
+  const statusUpdates = getAllStatusUpdates();
+  const statusMap: { [orderNo: string]: { pickupStatus: string; datapickup: string } } = {};
+  statusUpdates.forEach((update) => {
+    statusMap[update.order_no] = {
+      pickupStatus: update.pickup_status,
+      datapickup: update.datapickup || ''
+    };
+  });
+  
+  for (let i = 0; i < lines.length; i++) {
     if (lines[i].trim() === '') continue;
     
     // เปลี่ยนจาก comma เป็น tab สำหรับ TSV
@@ -39,10 +50,13 @@ function parseCSV(csvText: string): Order[] {
     
     // ลดเงื่อนไขลงเป็น 10 เพื่อรองรับข้อมูลที่ไม่ครบ
     if (values.length >= 10) { 
+      const orderNo = values[2] || '';
+      const statusUpdate = statusMap[orderNo];
+      
       data.push({
         timestamp: values[0] || '',
         email: values[1] || '',
-        orderNo: values[2] || '',
+        orderNo: orderNo,
         firstname: values[3] || '',
         lastname: values[4] || '',
         status: values[5] || '',
@@ -60,7 +74,23 @@ function parseCSV(csvText: string): Order[] {
         items: values[17] || '{}',
         note: values[18] || '',
         slip: values[19] || '',
-        pickupStatus: (statusUpdates[values[2]] as Order['pickupStatus']) || 'pending' // ใช้ status ที่อัปเดตแล้ว หรือ default เป็น pending
+        total: values[20] || '',
+        date: values[21] || '',
+        pickupStatus: (statusUpdate?.pickupStatus as Order['pickupStatus']) || 'pending',
+        datapickup: (() => {
+          // ตรวจสอบและทำความสะอาดข้อมูล datapickup
+          const tsvDatepickup = values[22] || '';
+          const dbDatepickup = statusUpdate?.datapickup || '';
+          
+          // ถ้าค่าจาก TSV หรือ DB เป็น "0" หรือค่าผิดพลาด ให้คืนค่าว่าง
+          if (tsvDatepickup && tsvDatepickup !== "0" && !isNaN(Date.parse(tsvDatepickup))) {
+            return tsvDatepickup;
+          } else if (dbDatepickup && dbDatepickup !== "0" && !isNaN(Date.parse(dbDatepickup))) {
+            return dbDatepickup;
+          }
+          
+          return ''; // คืนค่าว่างถ้าไม่มีวันที่ที่ถูกต้อง
+        })()
       });
     }
   }
@@ -103,19 +133,25 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const { orderNo, pickupStatus } = await request.json();
+    const { orderNo, pickupStatus, datapickup } = await request.json();
     
-    // อัปเดต status ใน memory storage
-    statusUpdates[orderNo] = pickupStatus;
+    // ตรวจสอบและทำความสะอาดข้อมูล datapickup
+    let cleanDatepickup = '';
+    if (datapickup && datapickup !== "0" && !isNaN(Date.parse(datapickup))) {
+      cleanDatepickup = datapickup;
+    }
     
-    console.log('Update request:', { orderNo, pickupStatus });
-    console.log('Current status updates:', statusUpdates);
+    // อัปเดต status ใน database
+    updateOrderStatus(orderNo, pickupStatus, cleanDatepickup);
+    
+    console.log('Update request:', { orderNo, pickupStatus, datapickup, cleanDatepickup });
     
     return NextResponse.json({ 
       success: true, 
       message: 'Status updated successfully',
       orderNo,
-      pickupStatus 
+      pickupStatus,
+      datapickup: cleanDatepickup
     });
   } catch (error) {
     console.error('Error updating status:', error);
