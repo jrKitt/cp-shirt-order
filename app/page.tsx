@@ -75,6 +75,7 @@ export default function ShirtPickupSystem() {
   const [currentPage, setCurrentPage] = useState(1);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string>('');
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   const totalPages = Math.ceil(filteredOrders.length / ITEMS_PER_PAGE);
   const paginatedOrders = filteredOrders.slice(
@@ -306,15 +307,89 @@ export default function ShirtPickupSystem() {
         await fetchOrders();
         
         setLastSync(new Date().toLocaleString('th-TH'));
-        alert(`นำเข้าข้อมูลเรียบร้อย: ${result.imported} รายการ`);
+        alert(`นำเข้าข้อมูลเรียบร้อย: ${result.imported} รายการ จากไฟล์ ${result.source || 'unknown'}`);
       } else {
-        alert("เกิดข้อผิดพลาดในการนำเข้าข้อมูล");
+        const error = await response.json();
+        alert(`เกิดข้อผิดพลาด: ${error.error || 'ไม่ทราบสาเหตุ'}`);
       }
     } catch (error) {
       console.error("Error importing datapickup:", error);
       alert("เกิดข้อผิดพลาดในการนำเข้าข้อมูล");
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.csv') && !file.name.endsWith('.json')) {
+      alert('กรุณาเลือกไฟล์ .csv หรือ .json');
+      return;
+    }
+
+    setUploadingFile(true);
+    try {
+      const text = await file.text();
+      
+      // Parse ข้อมูลจากไฟล์
+      let importData: Array<{
+        order_no: string;
+        pickup_status: string;
+        datapickup: string;
+        updated_at: string;
+      }> = [];
+
+      if (file.name.endsWith('.csv')) {
+        const lines = text.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          
+          const values = line.split(',');
+          if (values.length >= 2) {
+            const orderNo = values[0]?.trim()?.replace(/"/g, '');
+            const datapickup = values[1]?.trim()?.replace(/"/g, '');
+            
+            if (orderNo && orderNo !== 'Order No' && orderNo !== 'order_no') {
+              importData.push({
+                order_no: orderNo,
+                pickup_status: 'picked_up',
+                datapickup: datapickup || '',
+                updated_at: new Date().toISOString()
+              });
+            }
+          }
+        }
+      } else {
+        importData = JSON.parse(text);
+      }
+
+      // ส่งข้อมูลไปยัง API โดยตรง
+      const response = await fetch("/api/sync", {
+        method: "POST",
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ updates: importData })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        await fetchOrders();
+        setLastSync(new Date().toLocaleString('th-TH'));
+        alert(`อัปโหลดและนำเข้าข้อมูลเรียบร้อย: ${importData.length} รายการ`);
+      } else {
+        alert('เกิดข้อผิดพลาดในการอัปโหลด');
+      }
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('เกิดข้อผิดพลาดในการอัปโหลดไฟล์');
+    } finally {
+      setUploadingFile(false);
+      // Reset file input
+      event.target.value = '';
     }
   };
 
@@ -781,19 +856,33 @@ export default function ShirtPickupSystem() {
                 จากทั้งหมด {orders.length} รายการ
               </p>
               <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="file"
+                  accept=".csv,.json"
+                  onChange={handleFileUpload}
+                  disabled={uploadingFile}
+                  className="hidden"
+                  id="file-upload"
+                />
+                <label
+                  htmlFor="file-upload"
+                  className={`inline-flex items-center px-3 py-1.5 bg-blue-600 border border-blue-600 rounded-md text-xs font-medium text-white hover:bg-blue-700 transition-colors duration-200 cursor-pointer ${uploadingFile ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {uploadingFile ? "อัปโหลด..." : "📁 อัปโหลด CSV/JSON"}
+                </label>
                 <button
                   onClick={importDatapickup}
                   disabled={syncing}
                   className="inline-flex items-center px-3 py-1.5 bg-green-600 border border-green-600 rounded-md text-xs font-medium text-white hover:bg-green-700 transition-colors duration-200 disabled:opacity-50"
                 >
-                  {syncing ? "นำเข้า..." : "นำเข้า Datapickup"}
+                  {syncing ? "นำเข้า..." : "📥 นำเข้า Datapickup"}
                 </button>
                 <button
                   onClick={syncData}
                   disabled={syncing}
                   className="inline-flex items-center px-3 py-1.5 bg-purple-600 border border-purple-600 rounded-md text-xs font-medium text-white hover:bg-purple-700 transition-colors duration-200 disabled:opacity-50"
                 >
-                  {syncing ? "Sync..." : "Sync ข้อมูล"}
+                  {syncing ? "Sync..." : "🔄 Sync ข้อมูล"}
                 </button>
                 <button
                   onClick={clearCorruptedData}
